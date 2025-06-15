@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英語本翻訳・解説アプリ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 300;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 30px;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: rgba(102, 126, 234, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: rgba(102, 126, 234, 0.15);
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .upload-text {
+            font-size: 1.2em;
+            color: #555;
+            margin-bottom: 15px;
+        }
+
+        .upload-subtext {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .file-list {
+            margin: 20px 0;
+            background: rgba(102, 126, 234, 0.05);
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .file-size {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .remove-file {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .remove-file:hover {
+            background: #ff5252;
+            transform: scale(1.1);
+        }
+
+        .progress-container {
+            display: none;
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .status-message {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .status-success {
+            background: rgba(76, 175, 80, 0.1);
+            color: #2e7d32;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+
+        .status-error {
+            background: rgba(244, 67, 54, 0.1);
+            color: #c62828;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+
+        .results {
+            display: none;
+            margin-top: 30px;
+            padding: 30px;
+            background: rgba(102, 126, 234, 0.05);
+            border-radius: 15px;
+        }
+
+        .result-section {
+            margin-bottom: 25px;
+        }
+
+        .result-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+
+        .result-content {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            max-height: 200px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+
+        .download-section {
+            text-align: center;
+            padding: 20px;
+            background: rgba(76, 175, 80, 0.1);
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .word-count {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .upload-area {
+                padding: 40px 15px;
+            }
+
+            .btn {
+                padding: 12px 25px;
+                font-size: 1em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 英語本翻訳・解説アプリ</h1>
+        
+        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">英語の本の写真をアップロード</div>
+            <div class="upload-subtext">最大20枚まで対応 (PNG, JPG, JPEG, GIF, BMP)</div>
+        </div>
+        
+        <input type="file" id="file-input" multiple accept="image/*">
+        
+        <div id="file-list" class="file-list" style="display: none;"></div>
+        
+        <div style="text-align: center;">
+            <button id="process-btn" class="btn" onclick="processImages()" disabled>
+                🔄 翻訳・解析開始
+            </button>
+            <button id="clear-btn" class="btn" onclick="clearFiles()" style="background: #ff6b6b;">
+                🗑️ クリア
+            </button>
+        </div>
+        
+        <div id="progress" class="progress-container">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="status-text" style="text-align: center; margin-top: 10px; color: #666;">
+                処理中...
+            </div>
+        </div>
+        
+        <div id="status-message" class="status-message" style="display: none;"></div>
+        
+        <div id="results" class="results">
+            <div class="result-section">
+                <div class="result-title">
+                    📖 原文（英語）
+                </div>
+                <div id="original-text" class="result-content"></div>
+            </div>
+            
+            <div class="result-section">
+                <div class="result-title">
+                    🇯🇵 翻訳（日本語）
+                </div>
+                <div id="translated-text" class="result-content"></div>
+            </div>
+            
+            <div class="result-section">
+                <div class="result-title">
+                    📝 重要単語解説
+                    <span id="word-count" class="word-count"></span>
+                </div>
+                <div class="result-content">
+                    重要な単語の詳細解説がWordファイルに含まれています
+                </div>
+            </div>
+            
+            <div class="download-section">
+                <h3 style="margin-bottom: 15px; color: #2e7d32;">📄 ダウンロード</h3>
+                <button id="download-btn" class="btn" style="background: #4caf50;">
+                    💾 Wordファイルをダウンロード
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        let resultData = null;
+
+        // ファイル入力の処理
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            handleFiles(e.target.files);
+        });
+
+        // ドラッグ&ドロップ
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        function handleFiles(files) {
+            const maxFiles = 20;
+            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+            
+            for (let file of files) {
+                if (selectedFiles.length >= maxFiles) {
+                    showStatus('最大20枚まで選択可能です', 'error');
+                    break;
+                }
+                
+                if (!allowedTypes.includes(file.type)) {
+                    showStatus(`${file.name} は対応していないファイル形式です`, 'error');
+                    continue;
+                }
+                
+                if (selectedFiles.find(f => f.name === file.name)) {
+                    continue; // 重複ファイルはスキップ
+                }
+                
+                selectedFiles.push(file);
+            }
+            
+            updateFileList();
+            updateProcessButton();
+        }
+
+        function updateFileList() {
+            const fileList = document.getElementById('file-list');
+            
+            if (selectedFiles.length === 0) {
+                fileList.style.display = 'none';
+                return;
+            }
+            
+            fileList.style.display = 'block';
+            fileList.innerHTML = '';
+            
+            selectedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                
+                const fileInfo = document.createElement('div');
+                fileInfo.innerHTML = `
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                `;
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-file';
+                removeBtn.innerHTML = '×';
+                removeBtn.onclick = () => removeFile(index);
+                
+                fileItem.appendChild(fileInfo);
+                fileItem.appendChild(removeBtn);
+                fileList.appendChild(fileItem);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+            updateProcessButton();
+        }
+
+        function clearFiles() {
+            selectedFiles = [];
+            updateFileList();
+            updateProcessButton();
+            hideResults();
+            hideStatus();
+        }
+
+        function updateProcessButton() {
+            const processBtn = document.getElementById('process-btn');
+            processBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        async function processImages() {
+            if (selectedFiles.length === 0) return;
+            
+            const processBtn = document.getElementById('process-btn');
+            const progressContainer = document.getElementById('progress');
+            const progressFill = document.getElementById('progress-fill');
+            const statusText = document.getElementById('status-text');
+            
+            // UI更新
+            processBtn.disabled = true;
+            progressContainer.style.display = 'block';
+            hideStatus();
+            hideResults();
+            
+            try {
+                // FormDataを作成
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                // プログレス更新
+                progressFill.style.width = '30%';
+                statusText.textContent = 'ファイルをアップロード中...';
+                
+                // APIリクエスト
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                progressFill.style.width = '60%';
+                statusText.textContent = '処理中...';
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    progressFill.style.width = '100%';
+                    statusText.textContent = '完了！';
+                    
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                        showResults(data);
+                        showStatus('処理が完了しました！', 'success');
+                    }, 1000);
+                    
+                    resultData = data;
+                } else {
+                    throw new Error(data.error || 'エラーが発生しました');
+                }
+                
+            } catch (error) {
+                progressContainer.style.display = 'none';
+                showStatus(`エラー: ${error.message}`, 'error');
+                console.error('処理エラー:', error);
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+
+        function showResults(data) {
+            const results = document.getElementById('results');
+            const originalText = document.getElementById('original-text');
+            const translatedText = document.getElementById('translated-text');
+            const wordCount = document.getElementById('word-count');
+            const downloadBtn = document.getElementById('download-btn');
+            
+            originalText.textContent = data.original_text;
+            translatedText.textContent = data.translated_text;
+            wordCount.textContent = `${data.word_count}語`;
+            
+            downloadBtn.onclick = () => downloadFile(data);
+            
+            results.style.display = 'block';
+        }
+
+        function hideResults() {
+            document.getElementById('results').style.display = 'none';
+            resultData = null;
+        }
+
+        function downloadFile(data) {
+            try {
+                // Base64データをBlobに変換
+                const byteCharacters = atob(data.file_data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], {
+                    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                });
+                
+                // ダウンロードリンクを作成
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = data.filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showStatus('ファイルのダウンロードを開始しました', 'success');
+            } catch (error) {
+                showStatus('ダウンロードエラーが発生しました', 'error');
+                console.error('ダウンロードエラー:', error);
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusMessage = document.getElementById('status-message');
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message status-${type}`;
+            statusMessage.style.display = 'block';
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    hideStatus();
+                }, 5000);
+            }
+        }
+
+        function hideStatus() {
+            document.getElementById('status-message').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
