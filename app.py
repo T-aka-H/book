@@ -154,9 +154,77 @@ def extract_words_with_gemini_api(text):
         print(f"単語抽出エラー: {e}")
         return []
 
-def create_text_document(original_text, translated_text, important_words):
+def extract_grammar_patterns_with_gemini_api(text):
+    """Gemini APIを使用して構文パターンを抽出・解説"""
+    if not GEMINI_API_KEY:
+        return []
+    
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        prompt = f"""以下の英語テキストから、重要な文法・構文パターンを最大15個抽出し、
+各パターンについて以下の形式でJSONで返してください：
+
+{{
+    "grammar_patterns": [
+        {{
+            "pattern": "構文パターン名（例：as...as構文）",
+            "example_sentence": "テキストから該当する文を抜粋",
+            "structure": "構文の構造（例：as + 形容詞 + as + 主語 + 動詞）",
+            "meaning": "この構文の意味・用法",
+            "level": "初級/中級/上級",
+            "other_examples": "他の例文2-3個"
+        }}
+    ]
+}}
+
+抽出対象の構文パターン例：
+- 比較構文（as...as, more...than など）
+- 関係代名詞（who, which, that など）
+- 分詞構文（現在分詞、過去分詞）
+- 仮定法（if節、would など）
+- 倒置構文
+- 強調構文（it is...that など）
+- 同格構文
+- 省略構文
+- 慣用表現
+
+英語テキスト:
+{text[:1800]}"""
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        
+        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                response_text = result['candidates'][0]['content']['parts'][0]['text']
+                
+                # JSONを抽出
+                if "```json" in response_text:
+                    json_start = response_text.find("```json") + 7
+                    json_end = response_text.find("```", json_start)
+                    json_text = response_text[json_start:json_end].strip()
+                else:
+                    json_text = response_text
+                
+                data = json.loads(json_text)
+                return data.get("grammar_patterns", [])
+        
+        return []
+    
+    except Exception as e:
+        print(f"構文解析エラー: {e}")
+        return []
+
+def create_text_document(original_text, translated_text, important_words, grammar_patterns):
     """テキストドキュメントを作成"""
-    content = f"""英語テキスト翻訳・単語解説レポート
+    content = f"""英語テキスト翻訳・構文・単語解説レポート
 作成日時: {datetime.now().strftime("%Y年%m月%d日 %H:%M")}
 
 =========================================
@@ -169,6 +237,25 @@ def create_text_document(original_text, translated_text, important_words):
 =========================================
 {translated_text}
 
+=========================================
+文法・構文解説（{len(grammar_patterns)}パターン）
+=========================================
+
+"""
+    
+    for i, pattern in enumerate(grammar_patterns, 1):
+        content += f"""
+{i}. {pattern.get("pattern", "")}
+────────────────────────────────────────
+例文: {pattern.get("example_sentence", "")}
+構造: {pattern.get("structure", "")}
+意味・用法: {pattern.get("meaning", "")}
+レベル: {pattern.get("level", "")}
+他の例文: {pattern.get("other_examples", "")}
+
+"""
+
+    content += f"""
 =========================================
 重要単語解説（{len(important_words)}語）
 =========================================
@@ -291,6 +378,16 @@ def index():
                     🇯🇵 翻訳（日本語）
                 </div>
                 <div id="translated-text" class="result-content"></div>
+            </div>
+            
+            <div class="result-section">
+                <div class="result-title">
+                    📚 文法・構文解説
+                    <span id="grammar-count" class="word-count"></span>
+                </div>
+                <div class="result-content">
+                    重要な文法・構文パターンの詳細解説がレポートファイルに含まれています
+                </div>
             </div>
             
             <div class="result-section">
@@ -509,11 +606,13 @@ def index():
             const originalText = document.getElementById('original-text');
             const translatedText = document.getElementById('translated-text');
             const wordCount = document.getElementById('word-count');
+            const grammarCount = document.getElementById('grammar-count');
             const downloadBtn = document.getElementById('download-btn');
             
             originalText.textContent = data.original_text;
             translatedText.textContent = data.translated_text;
             wordCount.textContent = `${data.word_count}語`;
+            grammarCount.textContent = `${data.grammar_count}パターン`;
             
             downloadBtn.onclick = () => downloadFile(data);
             
@@ -628,8 +727,11 @@ def upload_files():
         # 重要単語抽出
         important_words = extract_words_with_gemini_api(all_text)
         
+        # 構文パターン抽出
+        grammar_patterns = extract_grammar_patterns_with_gemini_api(all_text)
+        
         # テキストドキュメント作成
-        doc_content = create_text_document(all_text, translated_text, important_words)
+        doc_content = create_text_document(all_text, translated_text, important_words, grammar_patterns)
         
         # ファイル保存
         output_filename = f"translation_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -652,6 +754,7 @@ def upload_files():
             'original_text': all_text[:500] + '...' if len(all_text) > 500 else all_text,
             'translated_text': translated_text[:500] + '...' if len(translated_text) > 500 else translated_text,
             'word_count': len(important_words),
+            'grammar_count': len(grammar_patterns),
             'download_url': f'/download/{output_filename}',
             'file_data': base64.b64encode(file_data).decode('utf-8'),
             'filename': output_filename
