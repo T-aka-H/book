@@ -36,7 +36,6 @@
             font-weight: 300;
             background: linear-gradient(45deg, #667eea, #764ba2);
             -webkit-background-clip: text;
-            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
@@ -246,6 +245,31 @@
             margin-left: 10px;
         }
 
+        .api-status {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            color: #f57c00;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
@@ -270,6 +294,10 @@
 <body>
     <div class="container">
         <h1>📚 英語本翻訳・解説アプリ</h1>
+        
+        <div id="api-status" class="api-status" style="display: none;">
+            ⚠️ Gemini APIキーが設定されていません。管理者に連絡してください。
+        </div>
         
         <div class="upload-area" onclick="document.getElementById('file-input').click()">
             <div class="upload-icon">📸</div>
@@ -322,14 +350,14 @@
                     <span id="word-count" class="word-count"></span>
                 </div>
                 <div class="result-content">
-                    重要な単語の詳細解説がWordファイルに含まれています
+                    重要な単語の詳細解説がレポートファイルに含まれています
                 </div>
             </div>
             
             <div class="download-section">
                 <h3 style="margin-bottom: 15px; color: #2e7d32;">📄 ダウンロード</h3>
                 <button id="download-btn" class="btn" style="background: #4caf50;">
-                    💾 Wordファイルをダウンロード
+                    💾 レポートをダウンロード
                 </button>
             </div>
         </div>
@@ -338,6 +366,18 @@
     <script>
         let selectedFiles = [];
         let resultData = null;
+
+        // APIキーステータス確認
+        window.addEventListener('load', function() {
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.api_key_status === 'missing') {
+                        document.getElementById('api-status').style.display = 'block';
+                    }
+                })
+                .catch(error => console.log('Health check failed:', error));
+        });
 
         // ファイル入力の処理
         document.getElementById('file-input').addEventListener('change', function(e) {
@@ -400,6 +440,11 @@
             fileList.style.display = 'block';
             fileList.innerHTML = '';
             
+            const header = document.createElement('h4');
+            header.textContent = `選択されたファイル (${selectedFiles.length}枚)`;
+            header.style.marginBottom = '15px';
+            fileList.appendChild(header);
+            
             selectedFiles.forEach((file, index) => {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'file-item';
@@ -458,6 +503,7 @@
             
             // UI更新
             processBtn.disabled = true;
+            processBtn.innerHTML = '<div class="loading-spinner"></div>処理中...';
             progressContainer.style.display = 'block';
             hideStatus();
             hideResults();
@@ -470,7 +516,7 @@
                 });
                 
                 // プログレス更新
-                progressFill.style.width = '30%';
+                progressFill.style.width = '20%';
                 statusText.textContent = 'ファイルをアップロード中...';
                 
                 // APIリクエスト
@@ -479,8 +525,8 @@
                     body: formData
                 });
                 
-                progressFill.style.width = '60%';
-                statusText.textContent = '処理中...';
+                progressFill.style.width = '50%';
+                statusText.textContent = 'AI処理中...';
                 
                 const data = await response.json();
                 
@@ -505,6 +551,7 @@
                 console.error('処理エラー:', error);
             } finally {
                 processBtn.disabled = false;
+                processBtn.innerHTML = '🔄 翻訳・解析開始';
             }
         }
 
@@ -539,7 +586,7 @@
                 }
                 const byteArray = new Uint8Array(byteNumbers);
                 const blob = new Blob([byteArray], {
-                    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    type: 'text/plain; charset=utf-8'
                 });
                 
                 // ダウンロードリンクを作成
