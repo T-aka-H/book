@@ -1,12 +1,17 @@
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, jsonify
 import os
 import base64
 import tempfile
 from datetime import datetime
 from werkzeug.utils import secure_filename
+import requests
+import json
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+
+# Gemini API設定（環境変数から取得）
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
@@ -15,86 +20,570 @@ if not os.path.exists(UPLOAD_FOLDER):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
 
-def create_sample_document():
-    """サンプルドキュメントを作成（デモ用）"""
-    content = f"""英語テキスト翻訳・単語解説レポート（デモ版）
+def extract_text_with_gemini_api(image_path):
+    """Gemini APIを直接使用して画像からテキストを抽出"""
+    if not GEMINI_API_KEY:
+        return "APIキーが設定されていません"
+    
+    try:
+        # 画像をbase64にエンコード
+        with open(image_path, 'rb') as image_file:
+            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        # Gemini API エンドポイント
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        # リクエストペイロード
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": "この画像から英語のテキストを正確に抽出してください。レイアウトや改行を可能な限り保持し、読みやすい形で出力してください。テキストのみを返してください。"},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_data
+                        }
+                    }
+                ]
+            }]
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                text = result['candidates'][0]['content']['parts'][0]['text']
+                return text.strip()
+        
+        return f"APIエラー: {response.status_code}"
+    
+    except Exception as e:
+        return f"OCRエラー: {str(e)}"
+
+def translate_text_with_gemini_api(text):
+    """Gemini APIを使用してテキストを翻訳"""
+    if not GEMINI_API_KEY:
+        return "APIキーが設定されていません"
+    
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        prompt = f"""以下の英語テキストを自然で読みやすい日本語に翻訳してください。
+文学的な表現や専門用語も適切に翻訳し、原文の意味とニュアンスを保持してください。
+
+英語テキスト:
+{text}"""
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        
+        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                translation = result['candidates'][0]['content']['parts'][0]['text']
+                return translation.strip()
+        
+        return f"翻訳APIエラー: {response.status_code}"
+    
+    except Exception as e:
+        return f"翻訳エラー: {str(e)}"
+
+def extract_words_with_gemini_api(text):
+    """Gemini APIを使用して重要単語を抽出"""
+    if not GEMINI_API_KEY:
+        return []
+    
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        prompt = f"""以下の英語テキストから、学習に重要な単語を最大20個選択し、
+各単語について以下の形式でJSONで返してください：
+
+{{
+    "words": [
+        {{
+            "word": "単語",
+            "definition": "日本語での意味・定義",
+            "example": "その単語を使った例文（英語）",
+            "example_translation": "例文の日本語訳",
+            "level": "初級/中級/上級"
+        }}
+    ]
+}}
+
+英語テキスト:
+{text[:1500]}"""
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        
+        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                response_text = result['candidates'][0]['content']['parts'][0]['text']
+                
+                # JSONを抽出
+                if "```json" in response_text:
+                    json_start = response_text.find("```json") + 7
+                    json_end = response_text.find("```", json_start)
+                    json_text = response_text[json_start:json_end].strip()
+                else:
+                    json_text = response_text
+                
+                data = json.loads(json_text)
+                return data.get("words", [])
+        
+        return []
+    
+    except Exception as e:
+        print(f"単語抽出エラー: {e}")
+        return []
+
+def create_text_document(original_text, translated_text, important_words):
+    """テキストドキュメントを作成"""
+    content = f"""英語テキスト翻訳・単語解説レポート
 作成日時: {datetime.now().strftime("%Y年%m月%d日 %H:%M")}
 
 =========================================
-システム情報
+原文（英語）
 =========================================
-このバージョンはデモ版です。
-実際のOCR・翻訳機能を使用するには、完全版をデプロイしてください。
+{original_text}
 
 =========================================
-機能テスト
+翻訳（日本語）
 =========================================
-✅ ファイルアップロード機能
-✅ UI表示機能
-✅ ダウンロード機能
-
-まずは基本機能が動作することを確認しました。
-次に AI 機能を段階的に追加していきます。
+{translated_text}
 
 =========================================
-今後の実装予定
+重要単語解説（{len(important_words)}語）
 =========================================
-- Google Gemini API 連携
-- 画像からのテキスト抽出
-- 自動翻訳機能
-- 重要単語解説生成
+
 """
+    
+    for i, word_info in enumerate(important_words, 1):
+        content += f"""
+{i}. {word_info.get("word", "")}
+────────────────────────────────────────
+意味: {word_info.get("definition", "")}
+レベル: {word_info.get("level", "")}
+例文: {word_info.get("example", "")}
+例文翻訳: {word_info.get("example_translation", "")}
+
+"""
+    
     return content
 
 @app.route('/')
 def index():
-    # まずは直接HTMLを返してテスト
-    html_content = '''
-<!DOCTYPE html>
+    try:
+        return render_template('index.html')
+    except:
+        # テンプレートが見つからない場合の緊急対応
+        return """<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>英語本翻訳・解説アプリ (デモ版)</title>
+    <title>英語本翻訳・解説アプリ</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; background: #f0f0f0; }
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-        h1 { color: #333; text-align: center; }
-        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
-        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
-        .btn:hover { background: #0056b3; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); border-radius: 20px; padding: 40px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1); backdrop-filter: blur(10px); }
+        h1 { text-align: center; color: #333; margin-bottom: 30px; font-size: 2.5em; font-weight: 300; background: linear-gradient(45deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .upload-area { border: 3px dashed #667eea; border-radius: 15px; padding: 60px 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; margin-bottom: 30px; background: rgba(102, 126, 234, 0.05); }
+        .upload-area:hover { border-color: #764ba2; background: rgba(102, 126, 234, 0.1); transform: translateY(-2px); }
+        .upload-area.dragover { border-color: #764ba2; background: rgba(102, 126, 234, 0.15); }
+        .upload-icon { font-size: 4em; margin-bottom: 20px; color: #667eea; }
+        .upload-text { font-size: 1.2em; color: #555; margin-bottom: 15px; }
+        .upload-subtext { color: #888; font-size: 0.9em; }
+        #file-input { display: none; }
+        .btn { background: linear-gradient(45deg, #667eea, #764ba2); color: white; border: none; padding: 15px 30px; font-size: 1.1em; border-radius: 25px; cursor: pointer; transition: all 0.3s ease; margin: 10px; text-decoration: none; display: inline-block; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .file-list { margin: 20px 0; background: rgba(102, 126, 234, 0.05); border-radius: 10px; padding: 20px; max-height: 200px; overflow-y: auto; }
+        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(102, 126, 234, 0.1); }
+        .file-item:last-child { border-bottom: none; }
+        .file-name { font-weight: 500; color: #333; }
+        .file-size { color: #666; font-size: 0.9em; }
+        .remove-file { background: #ff6b6b; color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; transition: all 0.3s ease; }
+        .remove-file:hover { background: #ff5252; transform: scale(1.1); }
+        .progress-container { display: none; margin: 20px 0; }
+        .progress-bar { width: 100%; height: 20px; background: rgba(102, 126, 234, 0.1); border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(45deg, #667eea, #764ba2); width: 0%; transition: width 0.3s ease; border-radius: 10px; }
+        .status-message { text-align: center; margin: 20px 0; padding: 15px; border-radius: 10px; font-weight: 500; }
+        .status-success { background: rgba(76, 175, 80, 0.1); color: #2e7d32; border: 1px solid rgba(76, 175, 80, 0.3); }
+        .status-error { background: rgba(244, 67, 54, 0.1); color: #c62828; border: 1px solid rgba(244, 67, 54, 0.3); }
+        .results { display: none; margin-top: 30px; padding: 30px; background: rgba(102, 126, 234, 0.05); border-radius: 15px; }
+        .result-section { margin-bottom: 25px; }
+        .result-title { font-size: 1.3em; font-weight: 600; color: #333; margin-bottom: 10px; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
+        .result-content { background: white; padding: 20px; border-radius: 10px; border-left: 4px solid #667eea; max-height: 200px; overflow-y: auto; line-height: 1.6; }
+        .download-section { text-align: center; padding: 20px; background: rgba(76, 175, 80, 0.1); border-radius: 10px; margin-top: 20px; }
+        .word-count { display: inline-block; background: #667eea; color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.9em; margin-left: 10px; }
+        .api-status { background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); color: #f57c00; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center; }
+        .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin-right: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 768px) { .container { padding: 20px; margin: 10px; } h1 { font-size: 2em; } .upload-area { padding: 40px 15px; } .btn { padding: 12px 25px; font-size: 1em; } }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📚 英語本翻訳・解説アプリ (デモ版)</h1>
-        <p style="text-align: center; color: #666;">Build成功！アプリが正常に動作しています 🎉</p>
+        <h1>📚 英語本翻訳・解説アプリ</h1>
         
-        <div class="upload-area">
-            <h3>✅ 基本機能テスト成功</h3>
-            <p>次の段階: AI機能の追加に進みます</p>
+        <div id="api-status" class="api-status" style="display: none;">
+            ⚠️ Gemini APIキーが設定されていません。管理者に連絡してください。
         </div>
         
+        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">英語の本の写真をアップロード</div>
+            <div class="upload-subtext">最大20枚まで対応 (PNG, JPG, JPEG, GIF, BMP)</div>
+        </div>
+        
+        <input type="file" id="file-input" multiple accept="image/*">
+        
+        <div id="file-list" class="file-list" style="display: none;"></div>
+        
         <div style="text-align: center;">
-            <button class="btn" onclick="alert('デモ版が正常に動作しています！')">
-                🔄 動作テスト
+            <button id="process-btn" class="btn" onclick="processImages()" disabled>
+                🔄 翻訳・解析開始
+            </button>
+            <button id="clear-btn" class="btn" onclick="clearFiles()" style="background: #ff6b6b;">
+                🗑️ クリア
             </button>
         </div>
         
-        <div style="margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 5px;">
-            <h4>✅ 確認済み機能:</h4>
-            <ul>
-                <li>Renderデプロイ成功</li>
-                <li>Flaskアプリ起動</li>
-                <li>HTML表示</li>
-                <li>CSS スタイリング</li>
-            </ul>
+        <div id="progress" class="progress-container">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="status-text" style="text-align: center; margin-top: 10px; color: #666;">
+                処理中...
+            </div>
+        </div>
+        
+        <div id="status-message" class="status-message" style="display: none;"></div>
+        
+        <div id="results" class="results">
+            <div class="result-section">
+                <div class="result-title">
+                    📖 原文（英語）
+                </div>
+                <div id="original-text" class="result-content"></div>
+            </div>
+            
+            <div class="result-section">
+                <div class="result-title">
+                    🇯🇵 翻訳（日本語）
+                </div>
+                <div id="translated-text" class="result-content"></div>
+            </div>
+            
+            <div class="result-section">
+                <div class="result-title">
+                    📝 重要単語解説
+                    <span id="word-count" class="word-count"></span>
+                </div>
+                <div class="result-content">
+                    重要な単語の詳細解説がレポートファイルに含まれています
+                </div>
+            </div>
+            
+            <div class="download-section">
+                <h3 style="margin-bottom: 15px; color: #2e7d32;">📄 ダウンロード</h3>
+                <button id="download-btn" class="btn" style="background: #4caf50;">
+                    💾 レポートをダウンロード
+                </button>
+            </div>
         </div>
     </div>
+
+    <script>
+        let selectedFiles = [];
+        let resultData = null;
+
+        // APIキーステータス確認
+        window.addEventListener('load', function() {
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.api_key_status === 'missing') {
+                        document.getElementById('api-status').style.display = 'block';
+                    }
+                })
+                .catch(error => console.log('Health check failed:', error));
+        });
+
+        // ファイル入力の処理
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            handleFiles(e.target.files);
+        });
+
+        // ドラッグ&ドロップ
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        function handleFiles(files) {
+            const maxFiles = 20;
+            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+            
+            for (let file of files) {
+                if (selectedFiles.length >= maxFiles) {
+                    showStatus('最大20枚まで選択可能です', 'error');
+                    break;
+                }
+                
+                if (!allowedTypes.includes(file.type)) {
+                    showStatus(`${file.name} は対応していないファイル形式です`, 'error');
+                    continue;
+                }
+                
+                if (selectedFiles.find(f => f.name === file.name)) {
+                    continue; // 重複ファイルはスキップ
+                }
+                
+                selectedFiles.push(file);
+            }
+            
+            updateFileList();
+            updateProcessButton();
+        }
+
+        function updateFileList() {
+            const fileList = document.getElementById('file-list');
+            
+            if (selectedFiles.length === 0) {
+                fileList.style.display = 'none';
+                return;
+            }
+            
+            fileList.style.display = 'block';
+            fileList.innerHTML = '';
+            
+            const header = document.createElement('h4');
+            header.textContent = `選択されたファイル (${selectedFiles.length}枚)`;
+            header.style.marginBottom = '15px';
+            fileList.appendChild(header);
+            
+            selectedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                
+                const fileInfo = document.createElement('div');
+                fileInfo.innerHTML = `
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                `;
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-file';
+                removeBtn.innerHTML = '×';
+                removeBtn.onclick = () => removeFile(index);
+                
+                fileItem.appendChild(fileInfo);
+                fileItem.appendChild(removeBtn);
+                fileList.appendChild(fileItem);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+            updateProcessButton();
+        }
+
+        function clearFiles() {
+            selectedFiles = [];
+            updateFileList();
+            updateProcessButton();
+            hideResults();
+            hideStatus();
+        }
+
+        function updateProcessButton() {
+            const processBtn = document.getElementById('process-btn');
+            processBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        async function processImages() {
+            if (selectedFiles.length === 0) return;
+            
+            const processBtn = document.getElementById('process-btn');
+            const progressContainer = document.getElementById('progress');
+            const progressFill = document.getElementById('progress-fill');
+            const statusText = document.getElementById('status-text');
+            
+            // UI更新
+            processBtn.disabled = true;
+            processBtn.innerHTML = '<div class="loading-spinner"></div>処理中...';
+            progressContainer.style.display = 'block';
+            hideStatus();
+            hideResults();
+            
+            try {
+                // FormDataを作成
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                // プログレス更新
+                progressFill.style.width = '20%';
+                statusText.textContent = 'ファイルをアップロード中...';
+                
+                // APIリクエスト
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                progressFill.style.width = '50%';
+                statusText.textContent = 'AI処理中...';
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    progressFill.style.width = '100%';
+                    statusText.textContent = '完了！';
+                    
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                        showResults(data);
+                        showStatus('処理が完了しました！', 'success');
+                    }, 1000);
+                    
+                    resultData = data;
+                } else {
+                    throw new Error(data.error || 'エラーが発生しました');
+                }
+                
+            } catch (error) {
+                progressContainer.style.display = 'none';
+                showStatus(`エラー: ${error.message}`, 'error');
+                console.error('処理エラー:', error);
+            } finally {
+                processBtn.disabled = false;
+                processBtn.innerHTML = '🔄 翻訳・解析開始';
+            }
+        }
+
+        function showResults(data) {
+            const results = document.getElementById('results');
+            const originalText = document.getElementById('original-text');
+            const translatedText = document.getElementById('translated-text');
+            const wordCount = document.getElementById('word-count');
+            const downloadBtn = document.getElementById('download-btn');
+            
+            originalText.textContent = data.original_text;
+            translatedText.textContent = data.translated_text;
+            wordCount.textContent = `${data.word_count}語`;
+            
+            downloadBtn.onclick = () => downloadFile(data);
+            
+            results.style.display = 'block';
+        }
+
+        function hideResults() {
+            document.getElementById('results').style.display = 'none';
+            resultData = null;
+        }
+
+        function downloadFile(data) {
+            try {
+                // Base64データをBlobに変換
+                const byteCharacters = atob(data.file_data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], {
+                    type: 'text/plain; charset=utf-8'
+                });
+                
+                // ダウンロードリンクを作成
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = data.filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showStatus('ファイルのダウンロードを開始しました', 'success');
+            } catch (error) {
+                showStatus('ダウンロードエラーが発生しました', 'error');
+                console.error('ダウンロードエラー:', error);
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusMessage = document.getElementById('status-message');
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message status-${type}`;
+            statusMessage.style.display = 'block';
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    hideStatus();
+                }, 5000);
+            }
+        }
+
+        function hideStatus() {
+            document.getElementById('status-message').style.display = 'none';
+        }
+    </script>
 </body>
-</html>
-    '''
-    return html_content
+</html>"""
+
+@app.route('/version')
+def version_check():
+    return jsonify({
+        'version': 'latest-2024-06-15',
+        'status': 'updated',
+        'template_status': 'embedded',
+        'timestamp': datetime.now().isoformat()
+    })
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
@@ -122,40 +611,28 @@ def upload_files():
         if not uploaded_files:
             return jsonify({'error': '有効な画像ファイルがありません'}), 400
         
-        # デモ用のサンプルテキスト
-        sample_original = f"""Demo Text (English)
-You have successfully uploaded {len(uploaded_files)} image(s).
-This is a demonstration version of the English book translation app.
-The actual OCR and translation features will be implemented once the deployment issues are resolved."""
+        # OCR処理
+        all_text = ""
         
-        sample_translation = f"""デモテキスト（日本語）
-{len(uploaded_files)}枚の画像が正常にアップロードされました。
-これは英語本翻訳アプリのデモンストレーション版です。
-実際のOCRと翻訳機能は、デプロイの問題が解決された後に実装されます。"""
+        for image_path in uploaded_files:
+            extracted_text = extract_text_with_gemini_api(image_path)
+            if extracted_text and not extracted_text.startswith("APIエラー") and not extracted_text.startswith("OCRエラー"):
+                all_text += extracted_text + "\n\n"
         
-        # サンプル単語データ
-        sample_words = [
-            {
-                "word": "demonstration",
-                "definition": "実演、デモンストレーション",
-                "example": "This is a demonstration of the app.",
-                "example_translation": "これはアプリのデモンストレーションです。",
-                "level": "中級"
-            },
-            {
-                "word": "translation",
-                "definition": "翻訳",
-                "example": "Translation is an important skill.",
-                "example_translation": "翻訳は重要なスキルです。",
-                "level": "初級"
-            }
-        ]
+        if not all_text.strip():
+            return jsonify({'error': 'テキストを抽出できませんでした'}), 400
         
-        # デモドキュメント作成
-        doc_content = create_sample_document()
+        # 翻訳
+        translated_text = translate_text_with_gemini_api(all_text)
+        
+        # 重要単語抽出
+        important_words = extract_words_with_gemini_api(all_text)
+        
+        # テキストドキュメント作成
+        doc_content = create_text_document(all_text, translated_text, important_words)
         
         # ファイル保存
-        output_filename = f"demo_translation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        output_filename = f"translation_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         output_path = os.path.join(temp_dir, output_filename)
         
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -172,9 +649,9 @@ The actual OCR and translation features will be implemented once the deployment 
         # レスポンス
         return jsonify({
             'status': 'success',
-            'original_text': sample_original,
-            'translated_text': sample_translation,
-            'word_count': len(sample_words),
+            'original_text': all_text[:500] + '...' if len(all_text) > 500 else all_text,
+            'translated_text': translated_text[:500] + '...' if len(translated_text) > 500 else translated_text,
+            'word_count': len(important_words),
             'download_url': f'/download/{output_filename}',
             'file_data': base64.b64encode(file_data).decode('utf-8'),
             'filename': output_filename
@@ -189,9 +666,11 @@ The actual OCR and translation features will be implemented once the deployment 
 
 @app.route('/health')
 def health_check():
+    api_key_status = 'ok' if GEMINI_API_KEY else 'missing'
     return jsonify({
         'status': 'healthy', 
-        'version': 'demo',
+        'version': 'latest-production',
+        'api_key_status': api_key_status,
         'message': 'アプリは正常に動作しています！',
         'timestamp': datetime.now().isoformat()
     })
@@ -203,6 +682,8 @@ def debug_info():
         'python_version': sys.version,
         'flask_working': True,
         'current_directory': os.getcwd(),
+        'template_folder': app.template_folder,
+        'gemini_api_configured': bool(GEMINI_API_KEY),
         'environment_vars': {
             'PORT': os.environ.get('PORT', 'Not Set'),
             'PYTHON_VERSION': os.environ.get('PYTHON_VERSION', 'Not Set')
@@ -216,6 +697,7 @@ def not_found(error):
     <p><a href="/">ホームに戻る</a></p>
     <p>デバッグ情報: <a href="/debug">/debug</a></p>
     <p>ヘルスチェック: <a href="/health">/health</a></p>
+    <p>バージョン確認: <a href="/version">/version</a></p>
     ''', 404
 
 @app.errorhandler(500)
@@ -224,9 +706,11 @@ def internal_error(error):
     <h1>500 - 内部サーバーエラー</h1>
     <p>アプリケーションでエラーが発生しました</p>
     <p><a href="/">ホームに戻る</a></p>
+    <p>ヘルスチェック: <a href="/health">/health</a></p>
     ''', 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print(f"アプリケーションをポート {port} で起動中...")
+    print(f"Gemini API設定状況: {'✅ 設定済み' if GEMINI_API_KEY else '❌ 未設定'}")
     app.run(host='0.0.0.0', port=port, debug=False)
