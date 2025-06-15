@@ -1,3 +1,4 @@
+
 from flask import Flask, request, render_template, jsonify
 import os
 import base64
@@ -48,7 +49,53 @@ def create_sample_document():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # まずは直接HTMLを返してテスト
+    html_content = '''
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英語本翻訳・解説アプリ (デモ版)</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f0f0f0; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        h1 { color: #333; text-align: center; }
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
+        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        .btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 英語本翻訳・解説アプリ (デモ版)</h1>
+        <p style="text-align: center; color: #666;">Build成功！アプリが正常に動作しています 🎉</p>
+        
+        <div class="upload-area">
+            <h3>✅ 基本機能テスト成功</h3>
+            <p>次の段階: AI機能の追加に進みます</p>
+        </div>
+        
+        <div style="text-align: center;">
+            <button class="btn" onclick="alert('デモ版が正常に動作しています！')">
+                🔄 動作テスト
+            </button>
+        </div>
+        
+        <div style="margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 5px;">
+            <h4>✅ 確認済み機能:</h4>
+            <ul>
+                <li>Renderデプロイ成功</li>
+                <li>Flaskアプリ起動</li>
+                <li>HTML表示</li>
+                <li>CSS スタイリング</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
+    '''
+    return html_content
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
@@ -143,8 +190,44 @@ The actual OCR and translation features will be implemented once the deployment 
 
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy', 'version': 'demo'})
+    return jsonify({
+        'status': 'healthy', 
+        'version': 'demo',
+        'message': 'アプリは正常に動作しています！',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/debug')
+def debug_info():
+    import sys
+    return jsonify({
+        'python_version': sys.version,
+        'flask_working': True,
+        'current_directory': os.getcwd(),
+        'environment_vars': {
+            'PORT': os.environ.get('PORT', 'Not Set'),
+            'PYTHON_VERSION': os.environ.get('PYTHON_VERSION', 'Not Set')
+        }
+    })
+
+@app.errorhandler(404)
+def not_found(error):
+    return '''
+    <h1>404 - ページが見つかりません</h1>
+    <p><a href="/">ホームに戻る</a></p>
+    <p>デバッグ情報: <a href="/debug">/debug</a></p>
+    <p>ヘルスチェック: <a href="/health">/health</a></p>
+    ''', 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return '''
+    <h1>500 - 内部サーバーエラー</h1>
+    <p>アプリケーションでエラーが発生しました</p>
+    <p><a href="/">ホームに戻る</a></p>
+    ''', 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    print(f"アプリケーションをポート {port} で起動中...")
     app.run(host='0.0.0.0', port=port, debug=False)
