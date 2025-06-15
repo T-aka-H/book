@@ -99,27 +99,34 @@ def translate_text_with_gemini_api(text):
         return f"翻訳エラー: {str(e)}"
 
 def extract_words_with_gemini_api(text):
-    """Gemini APIを使用して重要単語を抽出"""
+    """Gemini APIを使用して重要単語・フレーズを抽出"""
     if not GEMINI_API_KEY:
         return []
     
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
-        prompt = f"""以下の英語テキストから、学習に重要な単語を最大20個選択し、
-各単語について以下の形式でJSONで返してください：
+        prompt = f"""以下の英語テキストから、学習に重要な中級以上の単語・フレーズを抽出し、
+各項目について以下の形式でJSONで返してください（無理に20個まで埋める必要はありません）：
 
 {{
     "words": [
         {{
-            "word": "単語",
+            "word": "単語またはフレーズ",
             "definition": "日本語での意味・定義",
-            "example": "その単語を使った例文（英語）",
+            "example": "その語句を使った例文（英語）",
             "example_translation": "例文の日本語訳",
-            "level": "初級/中級/上級"
+            "level": "中級/上級"
         }}
     ]
 }}
+
+選択基準：
+- 中級以上のレベルの語彙のみ（初級語彙は除外）
+- 重要なイディオムやフレーズも含める
+- 学術的・専門的な語彙を優先
+- 文脈上重要な意味を持つ表現
+- ネイティブがよく使う自然な表現
 
 英語テキスト:
 {text[:1500]}"""
@@ -155,39 +162,43 @@ def extract_words_with_gemini_api(text):
         return []
 
 def extract_grammar_patterns_with_gemini_api(text):
-    """Gemini APIを使用して構文パターンを抽出・解説"""
+    """Gemini APIを使用して高度な構文パターンを抽出・解説"""
     if not GEMINI_API_KEY:
         return []
     
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
-        prompt = f"""以下の英語テキストから、重要な文法・構文パターンを最大15個抽出し、
-各パターンについて以下の形式でJSONで返してください：
+        prompt = f"""以下の英語テキストから、高度で難易度の高い文法・構文パターンのみを抽出し、
+各パターンについて以下の形式でJSONで返してください（簡単な構文は除外してください）：
 
 {{
     "grammar_patterns": [
         {{
-            "pattern": "構文パターン名（例：as...as構文）",
+            "pattern": "構文パターン名",
             "example_sentence": "テキストから該当する文を抜粋",
-            "structure": "構文の構造（例：as + 形容詞 + as + 主語 + 動詞）",
+            "structure": "構文の構造",
             "meaning": "この構文の意味・用法",
-            "level": "初級/中級/上級",
+            "level": "上級",
             "other_examples": "他の例文2-3個"
         }}
     ]
 }}
 
-抽出対象の構文パターン例：
-- 比較構文（as...as, more...than など）
-- 関係代名詞（who, which, that など）
-- 分詞構文（現在分詞、過去分詞）
-- 仮定法（if節、would など）
-- 倒置構文
-- 強調構文（it is...that など）
+抽出対象の高度な構文のみ：
+- 複雑な比較構文（as...as, no more...than など）
+- 関係代名詞の複雑な用法（前置詞+関係代名詞など）
+- 分詞構文（独立分詞構文、付帯状況など）
+- 仮定法（仮定法過去完了、if省略など）
+- 倒置構文（否定語句の倒置など）
+- 強調構文の複雑な形
 - 同格構文
 - 省略構文
-- 慣用表現
+- 挿入句・挿入節
+- 無生物主語構文
+- 結果・目的を表す構文
+
+注意：基本的な文法（現在形、過去形、単純な関係代名詞など）は除外してください。
 
 英語テキスト:
 {text[:1800]}"""
@@ -224,7 +235,7 @@ def extract_grammar_patterns_with_gemini_api(text):
 
 def create_text_document(original_text, translated_text, important_words, grammar_patterns):
     """テキストドキュメントを作成"""
-    content = f"""英語テキスト翻訳・構文・単語解説レポート
+    content = f"""英語テキスト翻訳・語句・構文解説レポート
 作成日時: {datetime.now().strftime("%Y年%m月%d日 %H:%M")}
 
 =========================================
@@ -238,7 +249,25 @@ def create_text_document(original_text, translated_text, important_words, gramma
 {translated_text}
 
 =========================================
-文法・構文解説（{len(grammar_patterns)}パターン）
+重要語句・フレーズ解説（{len(important_words)}項目）
+=========================================
+
+"""
+    
+    for i, word_info in enumerate(important_words, 1):
+        content += f"""
+{i}. {word_info.get("word", "")}
+────────────────────────────────────────
+意味: {word_info.get("definition", "")}
+レベル: {word_info.get("level", "")}
+例文: {word_info.get("example", "")}
+例文翻訳: {word_info.get("example_translation", "")}
+
+"""
+
+    content += f"""
+=========================================
+高度な文法・構文解説（{len(grammar_patterns)}パターン）
 =========================================
 
 """
@@ -252,24 +281,6 @@ def create_text_document(original_text, translated_text, important_words, gramma
 意味・用法: {pattern.get("meaning", "")}
 レベル: {pattern.get("level", "")}
 他の例文: {pattern.get("other_examples", "")}
-
-"""
-
-    content += f"""
-=========================================
-重要単語解説（{len(important_words)}語）
-=========================================
-
-"""
-    
-    for i, word_info in enumerate(important_words, 1):
-        content += f"""
-{i}. {word_info.get("word", "")}
-────────────────────────────────────────
-意味: {word_info.get("definition", "")}
-レベル: {word_info.get("level", "")}
-例文: {word_info.get("example", "")}
-例文翻訳: {word_info.get("example_translation", "")}
 
 """
     
@@ -382,21 +393,21 @@ def index():
             
             <div class="result-section">
                 <div class="result-title">
-                    📚 文法・構文解説
-                    <span id="grammar-count" class="word-count"></span>
+                    📝 重要語句・フレーズ
+                    <span id="word-count" class="word-count"></span>
                 </div>
                 <div class="result-content">
-                    重要な文法・構文パターンの詳細解説がレポートファイルに含まれています
+                    中級以上の重要語句・フレーズの詳細解説がレポートファイルに含まれています
                 </div>
             </div>
             
             <div class="result-section">
                 <div class="result-title">
-                    📝 重要単語解説
-                    <span id="word-count" class="word-count"></span>
+                    📚 高度な文法・構文
+                    <span id="grammar-count" class="word-count"></span>
                 </div>
                 <div class="result-content">
-                    重要な単語の詳細解説がレポートファイルに含まれています
+                    難易度の高い文法・構文パターンの詳細解説がレポートファイルに含まれています
                 </div>
             </div>
             
@@ -611,7 +622,7 @@ def index():
             
             originalText.textContent = data.original_text;
             translatedText.textContent = data.translated_text;
-            wordCount.textContent = `${data.word_count}語`;
+            wordCount.textContent = `${data.word_count}語句`;
             grammarCount.textContent = `${data.grammar_count}パターン`;
             
             downloadBtn.onclick = () => downloadFile(data);
@@ -678,9 +689,10 @@ def index():
 @app.route('/version')
 def version_check():
     return jsonify({
-        'version': 'latest-2024-06-15',
+        'version': 'latest-2024-06-15-v2',
         'status': 'updated',
         'template_status': 'embedded',
+        'features': ['OCR', 'Translation', 'Advanced_Vocabulary', 'Grammar_Patterns'],
         'timestamp': datetime.now().isoformat()
     })
 
@@ -724,7 +736,7 @@ def upload_files():
         # 翻訳
         translated_text = translate_text_with_gemini_api(all_text)
         
-        # 重要単語抽出
+        # 重要単語・フレーズ抽出
         important_words = extract_words_with_gemini_api(all_text)
         
         # 構文パターン抽出
@@ -772,7 +784,7 @@ def health_check():
     api_key_status = 'ok' if GEMINI_API_KEY else 'missing'
     return jsonify({
         'status': 'healthy', 
-        'version': 'latest-production',
+        'version': 'latest-production-v2',
         'api_key_status': api_key_status,
         'message': 'アプリは正常に動作しています！',
         'timestamp': datetime.now().isoformat()
